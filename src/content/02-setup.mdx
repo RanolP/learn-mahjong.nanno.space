@@ -1,0 +1,67 @@
+import { Hand } from "~/domains/tile/Hand";
+import { TileBox } from "~/domains/tile/TileBox";
+import { TableSetup } from "~/domains/table/TableSetup";
+import { PickDealer } from "~/domains/table/PickDealer";
+import { DealTiles } from "~/domains/table/DealTiles";
+import { RoundRotation } from "~/domains/table/RoundRotation";
+
+# 게임 준비
+
+마작은 네 명이 한 판을 한다. 패를 돌리기 전에 정해두는 것들을 알아보자.
+
+## 패 세팅
+
+한 게임에서 사용하는 패는 136장이다.
+
+<div class="my-4 flex flex-wrap items-start gap-3">
+  <TileBox label="만수 36장" notation="123456789m" />
+  <TileBox label="통수 36장" notation="123456789p" />
+  <TileBox label="삭수 36장" notation="123456789s" />
+  <TileBox label="자패 28장 · 적5 3장" notation="1234567z" columns={9} extra="0m0p0s" />
+</div>
+
+위 박스에 담긴 것처럼, 각 패는 4개씩 사용한다. 그리고 특히, 5만, 5통, 5삭 패는 1개를 적색 패로 교체해 사용하는 게임 규칙도 있다.
+
+## 자리
+
+마작은 4명이 플레이하는 게임으로, 동, 남, 서, 북 순서대로 앉는다. 시작하기 전에 누가 어디에 앉을지와 누가 선인지를 먼저 정한다. 선은 친이라고 부른다.
+
+<PickDealer />
+
+자리와 친이 정해지면 패산을 쌓는다. 각자 자기 앞의 패산을 맡는다.
+
+<TableSetup />
+
+패산을 쌓았으면 패를 나눈다. 어디서부터 가져갈지는 친이 굴린 주사위가 정한다.
+
+<DealTiles />
+
+한 라운드가 종료될 때마다, 동, 남, 서, 북을 한칸 돌린다.
+
+<RoundRotation />
+
+## 배패 13장
+
+패를 뒤집어 섞은 뒤 벽처럼 쌓는다. 이 벽을 산이라고 한다. 산에서 각자 13장씩 나눠 받는데, 처음 받은 이 13장을 배패라고 한다.
+
+<Hand notation="123m456p789s1122z" class="h-12" />
+
+자기 차례가 오면 산에서 한 장을 가져오고, 필요 없는 한 장을 버린다. 그래서 차례 도중에만 손패가 14장이 된다.
+
+## 도라
+
+산의 패 한 장은 처음부터 뒤집어 둔다. 이 패를 도라 표시패라고 한다. 표시패 자체가 아니라, 표시패의 다음 패가 도라다.
+
+표시패가 3만이면
+
+<Hand notation="3m" />
+
+도라는 4만이다.
+
+<Hand notation="4m" />
+
+도라를 손에 들고 화료하면 점수가 올라간다. 다만 도라만으로는 화료할 수 없다.
+
+## 동장전과 반장전
+
+동 바람 네 판으로 끝내는 방식을 동장전이라 하고, 남 바람까지 여덟 판을 하는 방식을 반장전이라 한다. 온라인 마작은 보통 반장전이 기본이다.

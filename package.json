@@ -1,0 +1,39 @@
+{
+  "name": "mahjong-tutorial-easy",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "start": "node .output/server/index.mjs",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mdx-js/mdx": "^2.3.0",
+    "@mdx-js/rollup": "^3.1.1",
+    "@solidjs/router": "^1.0.0",
+    "@solidjs/start": "^2.0.0",
+    "nitro": "^3.0.260610-beta",
+    "solid-js": "^1.9.14",
+    "solid-mdx": "^0.0.7",
+    "three": "^0.185.1",
+    "vite": "^8.0.0"
+  },
+  "devDependencies": {
+    "@solidjs/testing-library": "^0.8.10",
+    "@tailwindcss/vite": "^4.0.7",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@types/node": "^26.3.0",
+    "@types/three": "^0.185.4",
+    "jsdom": "^25.0.1",
+    "tailwindcss": "^4.0.7",
+    "typescript": "^5.9.3",
+    "vite-plugin-solid": "^2.11.14",
+    "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
