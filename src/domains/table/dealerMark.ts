@@ -2,7 +2,8 @@ import * as THREE from "three";
 import { easeOutExpo } from "./animation";
 
 /**
- * 친을 세는 표시와, 다 세고 나서 진짜 친 앞에 놓는 표시패.
+ * 친을 세는 표시와, 세기가 멈춘 사람 머리 위의 東 표시, 그리고 다 세고 나서
+ * 진짜 친 앞에 놓는 표시패.
  *
  * 세는 방법이 이 그림의 요점이다. 굴린 사람을 1 로 두고 반시계로 한 자리씩
  * 옮겨 가며 1, 2, 3 … 을 세고, 눈의 합에서 멈춘 자리가 친이다. 그래서 표시가
@@ -21,6 +22,8 @@ const RING_RADIUS = 12.3;
 const PLAQUE_RADIUS = 11.4;
 const PLAQUE_ASIDE = -3.2;
 const PLAQUE = { w: 2.6, h: 0.34, l: 1.5 } as const;
+/** 東 표시가 뜨는 높이. 앉은 사람 머리 위쯤이다. */
+const CROWN_HEIGHT = 6.6;
 /** 한 자리에 머무는 동안 앞자리에서 옮겨 오는 데 쓰는 시간의 비율. */
 const HOP = 0.55;
 /** 셀 수 있는 가장 큰 수. 주사위 두 개의 합이라 12 를 넘지 않는다. */
@@ -48,7 +51,7 @@ function makeRingFace() {
  * 세는 숫자. 판에 눕혀 그리면 자리마다 기울기와 위아래가 달라져 읽기 어려우니,
  * 언제나 화면을 향하는 판때기에 그려 자리 위에 띄운다.
  */
-function makeCount(value: number) {
+export function makeCountFace(value: number) {
   const SIZE = 256;
   const canvas = document.createElement("canvas");
   canvas.width = SIZE;
@@ -62,6 +65,29 @@ function makeCount(value: number) {
   ctx.strokeText(String(value), SIZE / 2, SIZE / 2);
   ctx.fillStyle = "#fbbf24";
   ctx.fillText(String(value), SIZE / 2, SIZE / 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
+ * 세기가 멈춘 사람 머리 위에 띄우는 東. 그 사람이 이번 판의 동가라는 표시라,
+ * 판에 눕힌 자리 글자와 달리 사람 위에 뜬다.
+ */
+function makeCrown() {
+  const SIZE = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = SIZE;
+  canvas.height = SIZE;
+  const ctx = canvas.getContext("2d")!;
+  ctx.font = `bold ${SIZE * 0.72}px serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineWidth = SIZE * 0.08;
+  ctx.strokeStyle = "#1f2937";
+  ctx.strokeText("東", SIZE / 2, SIZE / 2);
+  ctx.fillStyle = "#f4ecd8";
+  ctx.fillText("東", SIZE / 2, SIZE / 2);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
@@ -90,13 +116,17 @@ export function createDealerMark(): {
   /**
    * from 은 1 을 세는 자리(東 을 0 으로 하고 반시계로 센 번호)이고, steps 는
    * 눈의 합, progress 는 세어 나간 정도다. ring 과 plaque 는 각각의 진하기다.
+   * crown 은 다 센 자리에 東 을 띄울지다. 친을 정하는 장면에서만 켠다. 패산을
+   * 어디서 끊을지 세는 장면에서는 그 자리가 동가라는 뜻이 아니라, 띄우면 틀린
+   * 말을 하는 그림이 된다.
    */
   place: (
     from: number,
     steps: number,
     progress: number,
     ring: number,
-    plaque: number
+    plaque: number,
+    crown: boolean
   ) => void;
   dispose: () => void;
 } {
@@ -111,7 +141,7 @@ export function createDealerMark(): {
   group.add(ring);
 
   // 숫자마다 그림이 다르므로 미리 다 그려 두고 텍스처만 갈아 끼운다.
-  const counts = Array.from({ length: MAX_COUNT }, (_, i) => makeCount(i + 1));
+  const counts = Array.from({ length: MAX_COUNT }, (_, i) => makeCountFace(i + 1));
   const digitGeometry = new THREE.PlaneGeometry(3.4, 3.4);
   // 숫자는 손보다 앞에 그린다. 가려지면 무엇을 세는 그림인지 알 수 없다.
   const digitMaterial = new THREE.MeshBasicMaterial({
@@ -134,6 +164,20 @@ export function createDealerMark(): {
   );
   const unturn = new THREE.Quaternion();
 
+  // 東 은 세기가 끝난 뒤에 뜬다. 세는 동안 따라다니면 아직 정해지지 않은
+  // 자리를 가리키게 되어, 무엇이 정해졌는지가 흐려진다.
+  const crownGeometry = new THREE.PlaneGeometry(3.6, 3.6);
+  const crownFace = makeCrown();
+  const crownMaterial = new THREE.MeshBasicMaterial({
+    map: crownFace,
+    transparent: true,
+    depthTest: false
+  });
+  const crown = new THREE.Mesh(crownGeometry, crownMaterial);
+  crown.renderOrder = 2;
+  crown.position.set(0, CROWN_HEIGHT, RING_RADIUS);
+  group.add(crown);
+
   const plaqueGeometry = new THREE.BoxGeometry(PLAQUE.w, PLAQUE.h, PLAQUE.l);
   const wood = new THREE.MeshStandardMaterial({ color: "#e7dcc2", roughness: 0.7 });
   const top = new THREE.MeshStandardMaterial({ map: makePlaqueFace(), roughness: 0.6 });
@@ -144,7 +188,7 @@ export function createDealerMark(): {
 
   return {
     group,
-    place(from, steps, progress, ringOpacity, plaqueOpacity) {
+    place(from, steps, progress, ringOpacity, plaqueOpacity, showCrown) {
       // 지금 세고 있는 수. 진행도를 걸음 수로 나눠 한 칸씩 올라간다.
       const walked = progress * steps;
       const count = Math.min(steps, Math.floor(walked) + 1);
@@ -167,6 +211,13 @@ export function createDealerMark(): {
       unturn.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -group.rotation.y);
       digit.quaternion.copy(unturn).multiply(billboard);
 
+      // 다 세고 멈춘 자리가 동가다. 세기가 끝나갈 때 그 사람 머리 위에 뜬다.
+      const crowned = showCrown ? easeOutExpo(Math.max(0, (progress - 0.85) / 0.15)) : 0;
+      crown.visible = crowned > 0.01;
+      crownMaterial.opacity = crowned;
+      crown.position.y = CROWN_HEIGHT - (1 - crowned) * 1.2;
+      crown.quaternion.copy(unturn).multiply(billboard);
+
       plaque.visible = plaqueOpacity > 0.01;
       // 놓이는 순간 위에서 내려앉는다.
       plaque.position.y = PLAQUE.h / 2 + (1 - plaqueOpacity) * 4;
@@ -175,6 +226,9 @@ export function createDealerMark(): {
       ringGeometry.dispose();
       ringFace.dispose();
       ringMaterial.dispose();
+      crownGeometry.dispose();
+      crownFace.dispose();
+      crownMaterial.dispose();
       digitGeometry.dispose();
       for (const texture of counts) texture.dispose();
       digitMaterial.dispose();

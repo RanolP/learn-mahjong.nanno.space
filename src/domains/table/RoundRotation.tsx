@@ -18,8 +18,9 @@ const STEPS = [
 export function RoundRotation() {
   return (
     <Stepper steps={STEPS}>
-      {step => (
+      {(step, instant) => (
         <TableView
+          instant={instant()}
           state={{ brokenAt: 12, drawn: 0 }}
           seats
           arrow

@@ -4,6 +4,9 @@ import {
   STACKS_PER_SIDE,
   TOTAL_TILES,
   breakPoint,
+  BUILD_GROUP,
+  GROUPS_PER_SIDE,
+  SIDES,
   buildOrder,
   drawableTiles,
   wallSlots
@@ -74,19 +77,47 @@ describe("wallSlots", () => {
 describe("buildOrder", () => {
   const slots = wallSlots({ brokenAt: 0, drawn: 0 });
 
-  it("한 스택에서 아래 패를 위 패보다 먼저 놓는다", () => {
+  it("네 장이 한 묶음으로 함께 놓인다", () => {
+    const { rank } = buildOrder(slots);
+    const grouped = new Map<string, number>();
     slots.forEach((slot, i) => {
-      const pair = slots.findIndex(
-        (other, j) => j !== i && other.side === slot.side && other.stack === slot.stack
-      );
-      const rank = buildOrder(slots);
-      if (slot.tier === 0) expect(rank[i]).toBeLessThan(rank[pair]);
+      const key = `${slot.side}:${rank[i]}`;
+      grouped.set(key, (grouped.get(key) ?? 0) + 1);
     });
+    // 17 스택은 두 짝으로 떨어지지 않아 변마다 마지막 묶음만 두 장이다.
+    const sizes = [...grouped.values()];
+    expect(sizes.filter(size => size === 4).length).toBe((GROUPS_PER_SIDE - 1) * SIDES);
+    expect(sizes.filter(size => size === 2).length).toBe(SIDES);
   });
 
-  it("순서를 하나도 빠뜨리거나 겹치지 않는다", () => {
-    const rank = buildOrder(slots);
-    expect([...rank].sort((a, b) => a - b)).toEqual(slots.map((_, i) => i));
+  it("변마다 순서를 하나도 빠뜨리거나 겹치지 않는다", () => {
+    const { rank, total } = buildOrder(slots);
+    const sides = new Set(slots.map(slot => slot.side));
+    for (const side of sides) {
+      const mine = new Set(slots.map((slot, i) => (slot.side === side ? rank[i] : -1)));
+      mine.delete(-1);
+      expect([...mine].sort((a, b) => a - b)).toEqual(
+        Array.from({ length: GROUPS_PER_SIDE }, (_, i) => i)
+      );
+      expect(total[slots.findIndex(slot => slot.side === side)]).toBe(GROUPS_PER_SIDE);
+    }
+  });
+
+  it("네 변이 한꺼번에 쌓기 시작한다", () => {
+    // 네 사람이 각자 제 앞을 맡으므로, 변마다 0 번째 묶음이 따로 있다.
+    const { rank } = buildOrder(slots);
+    const first = slots.filter((_, i) => rank[i] === 0);
+    expect(new Set(first.map(slot => slot.side)).size).toBe(SIDES);
+  });
+
+  it("주사위로 끊은 자리가 쌓는 순서를 흔들지 않는다", () => {
+    // 쌓기는 끊기 전의 일이다. 어디서 끊든 넷은 제 변 끝에서부터 쌓는다.
+    for (const brokenAt of [0, 5, 23, 51]) {
+      const laid = wallSlots({ brokenAt, drawn: 0 });
+      const { rank } = buildOrder(laid);
+      const starts = laid.filter((_, i) => rank[i] === 0);
+      expect(starts.every(slot => slot.stack < BUILD_GROUP)).toBe(true);
+    }
   });
 });
 

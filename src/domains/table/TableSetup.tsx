@@ -24,8 +24,9 @@ const STEPS = [
 export function TableSetup() {
   return (
     <Stepper steps={STEPS}>
-      {step => (
+      {(step, instant) => (
         <TableView
+          instant={instant()}
           state={{ brokenAt: 12, drawn: 0 }}
           seats
           built={step() > 0}

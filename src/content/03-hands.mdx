@@ -1,0 +1,84 @@
+import { Hand } from "~/domains/tile/Hand";
+import { HandShape } from "~/domains/tile/HandShape";
+import { Tenpai } from "~/domains/tile/Tenpai";
+
+# 패 만들기
+
+마작은 패가 14장이 됐을 때, 특정 조합을 맞추면 이기는 게임이다.
+
+## 쯔모와 론
+
+손패는 언제나 13장으로 유지한다. 매 턴 작사(플레이어)는 패를 뽑고, 버린다. 그 턴에
+
+- 내가 뽑은 패가 조합을 만들면 : 쯔모
+- 남이 버린 패가 조합을 만들면 : 론 (내가 버린 적 있는 패는 남이 버려도 못 줍는다)
+
+그렇게 승리를 선언하는 행위를 화료라고 한다.
+
+## 머리와 몸통
+
+머리는 두 장짜리 칸이고, 몸통은 세 장짜리 칸이다. 몸통은 총 4개를 만들어야 한다.
+
+<HandShape
+  groups={[2, 3, 3, 3, 3]}
+  labels={["머리", "몸통", "몸통", "몸통", "몸통"]}
+  class="h-12"
+/>
+
+## 머리
+
+머리는 같은 패를 두 장 구성하면 된다.
+
+<span class="inline-flex flex-wrap items-end gap-4">
+  <Hand notation="11m" class="h-12" />
+  <Hand notation="44s" class="h-12" />
+  <Hand notation="33z" class="h-12" />
+  <Hand notation="66z" class="h-12" />
+</span>
+
+## 몸통
+
+몸통을 만드는 방법은 두가지다.
+
+<span class="inline-flex flex-wrap items-end gap-4">
+  <Hand notation="123m" class="h-12" />
+  <Hand notation="456p" class="h-12" />
+  <Hand notation="789s" class="h-12" />
+</span>
+
+숫자패를 순서대로 나열하거나 (슌쯔),
+
+<span class="inline-flex flex-col items-start gap-2">
+  <span class="inline-flex flex-wrap items-end gap-4">
+    <Hand notation="111p" class="h-12" />
+    <Hand notation="550m" class="h-12" />
+    <Hand notation="888s" class="h-12" />
+  </span>
+  <span class="inline-flex flex-wrap items-end gap-4">
+    <Hand notation="111z" class="h-12" />
+    <Hand notation="777z" class="h-12" />
+  </span>
+</span>
+
+어떤 패든 3개를 모으면 된다 (커쯔).
+
+## 리치
+
+나만의 힘으로 머리 하나, 몸통 넷을 구성할 준비를 마치면, 플레이어는 마지막 한 패를 노리며 "리치"를 걸 수 있다.
+
+어떤 패를 기다리느냐에 따라 대기 모양에 이름이 붙는다.
+
+<Tenpai
+  name="양면 대기"
+  note="이어진 두 장의 양쪽을 기다린다"
+  hand="123456789m22p34s"
+  waits="25s"
+/>
+
+<Tenpai name="간짱 대기" note="사이에 낀 한 장을 기다린다" hand="123456789m22p46s" waits="5s" />
+
+<Tenpai name="변짱 대기" note="끝에 붙는 한 장만 기다린다" hand="123456789m22p12s" waits="3s" />
+
+<Tenpai name="단기 대기" note="몸통 넷을 다 만들고 머리 짝만 기다린다" hand="123456789m123s5p" waits="5p" />
+
+기다리는 패가 두 장인 양면 대기가 가장 넓고, 간짱 대기와 변짱 대기는 한 장뿐이라 좁다.

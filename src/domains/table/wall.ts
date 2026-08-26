@@ -79,7 +79,7 @@ function stackAt(brokenAt: number, offset: number) {
  * 시계 방향이고, 한 변 안에서도 스택 번호가 커질수록 시계 방향으로 나아간다.
  * 그래서 변이 바뀌는 자리에서 좌표가 끊기지 않는다.
  */
-function placeStack(side: number, stack: number) {
+export function stackSpot(side: number, stack: number) {
   const along = (STACKS_PER_SIDE - 1 - stack - (STACKS_PER_SIDE - 1) / 2) * TILE_SIZE.w;
   const angle = -side * (Math.PI / 2);
   const sin = Math.sin(angle);
@@ -106,7 +106,7 @@ export function wallSlots(state: WallState): WallSlot[] {
     const { side, stack } = stackAt(state.brokenAt, Math.floor(order / TIERS));
     // 한 스택에서는 위 패를 먼저 가져간다. 순번의 짝수 쪽이 위 단이다.
     const tier = order % TIERS === 0 ? 1 : 0;
-    const { x, z, rotationY } = placeStack(side, stack);
+    const { x, z, rotationY } = stackSpot(side, stack);
     slots.push({
       side,
       stack,
@@ -121,20 +121,26 @@ export function wallSlots(state: WallState): WallSlot[] {
   return slots;
 }
 
+/** 한 번에 밀어 넣는 묶음의 스택 수. 두 스택 두 단, 곧 네 장이 한 묶음이다. */
+export const BUILD_GROUP = 2;
+/** 한 변이 미는 묶음 수. 17 스택은 두 짝으로 떨어지지 않아 마지막 묶음만 홀로 남는다. */
+export const GROUPS_PER_SIDE = Math.ceil(STACKS_PER_SIDE / BUILD_GROUP);
+
 /**
- * 패산을 쌓는 순서. wallSlots 는 가져가는 순서대로 주므로 한 스택의 위 패가
- * 먼저 나오는데, 쌓을 때는 아래 패부터 놓아야 위 패가 허공에 뜨지 않는다.
- * 자리 목록의 index 번째 패가 몇 번째로 놓이는지를 돌려준다.
+ * 패산을 쌓는 순서. 네 사람이 저마다 제 앞의 패산을 맡아 한꺼번에 쌓으므로,
+ * 순서를 하나로 세지 않고 변마다 따로 센다. 실제로도 한 장씩 얹지 않고 두 장을
+ * 겹쳐 쥔 손 두 개로 네 장을 한 번에 밀어 넣으므로, 세는 단위도 그 묶음이다.
+ * rank[i] 는 그 패가 든 묶음이 제 변에서 몇 번째로 놓이는지이고, total[i] 는 그
+ * 변이 미는 묶음 수다.
+ *
+ * 순서는 목록에 나온 차례가 아니라 그 패가 놓인 자리에서 바로 구한다. wallSlots
+ * 는 주사위로 끊은 자리부터 가져가는 차례로 주므로, 그 차례를 그대로 쓰면 끊은
+ * 자리가 낀 변만 한가운데에서 쌓기 시작하고 그 앞 스택들은 맨 끝으로 밀린다.
+ * 쌓기는 끊기 전의 일이라 주사위와 아무 상관이 없다.
  */
-export function buildOrder(slots: readonly WallSlot[]): number[] {
-  const rank = slots.map((_, i) => i);
-  for (let i = 0; i + 1 < slots.length; i += 1) {
-    const upper = slots[i];
-    const lower = slots[i + 1];
-    if (upper.tier === 1 && lower.side === upper.side && lower.stack === upper.stack) {
-      [rank[i], rank[i + 1]] = [rank[i + 1], rank[i]];
-      i += 1;
-    }
-  }
-  return rank;
+export function buildOrder(slots: readonly WallSlot[]): { rank: number[]; total: number[] } {
+  return {
+    rank: slots.map(slot => Math.floor(slot.stack / BUILD_GROUP)),
+    total: slots.map(() => GROUPS_PER_SIDE)
+  };
 }

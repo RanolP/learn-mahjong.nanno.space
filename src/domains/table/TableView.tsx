@@ -2,10 +2,18 @@ import { createEffect, onCleanup, onMount } from "solid-js";
 import * as THREE from "three";
 import { createHands } from "./hands";
 import { ENTRY_HEIGHT, stagger } from "./animation";
-import { WINDS, seatAngle, seatEntry, windAngle } from "./seats";
-import { DEALT_TILES, HAND_TILES, dealIndex, dealSeat } from "./deal";
+import { WINDS, drawnBy, pickBeats, seatAngle, seatEntry, windAngle } from "./seats";
+import {
+  DEALT_TILES,
+  DEAL_GROUPS,
+  HAND_TILES,
+  dealGroup,
+  dealIndex,
+  dealSeat
+} from "./deal";
 import { createDice } from "./dice";
 import { createDealerMark } from "./dealerMark";
+import { createBreakMark } from "./breakMark";
 import { createPicks } from "./picks";
 import {
   STACKS_PER_SIDE,
@@ -230,24 +238,40 @@ export function TableView(props: {
   deadWall?: boolean;
   /** 선이 굴린 주사위 두 개. 넘기면 판 가운데에서 굴러 그 눈에 멈춘다. */
   dice?: readonly [number, number];
+  /**
+   * 끊을 자리를 주사위 눈만큼 세는 표시. 그 사람 오른쪽 끝에서 한 스택씩
+   * 1, 2, 3 … 을 짚고, 다 세면 끊는 자리에 금을 긋는다. 세는 수와 어느 변을
+   * 쓸지는 state.brokenAt 이 이미 담고 있어 따로 받지 않는다.
+   */
+  breakCount?: boolean;
   /** 왕패를 남은 패산에서 바깥으로 밀어 떼어 놓는다. */
   split?: boolean;
   /** 네 사람이 배패 13장씩을 패산에서 가져가 자기 앞에 세운다. */
   dealt?: boolean;
-  /** 자리를 정하는 동남서북 패 네 장을 판 가운데에 엎어 놓는다. */
+  /** 동남서북 패 네 장을 판 가운데에 펼쳐 보이고, 엎어서 섞는다. */
   picks?: boolean;
-  /** 나눠 가진 동남서북 패를 그 자리에서 뒤집어 어떤 바람인지 보인다. */
+  /**
+   * 네 사람이 차례로 섞인 패를 한 장씩 집어 온다. 한 사람이 집어 오고, 뒤집어
+   * 읽고, 그 바람 자리에 앉는 세 박자를 넷이 차례로 되풀이한다.
+   */
   picked?: boolean;
   /** 자리 바람 글자를 판에 놓는다. 넘기지 않으면 앉는 것과 함께 나타난다. */
   winds?: boolean;
   /**
    * 친을 세는 장면. from 은 1 을 세는 자리(東 을 0 으로 하고 반시계로 센 번호),
    * steps 는 주사위 눈의 합이다. 주사위가 멈추면 합을 크게 띄우고, 이어서
-   * 표시가 자리마다 1, 2, 3 … 을 짚어 가며 steps 에서 멈춘다.
+   * 표시가 자리마다 1, 2, 3 … 을 짚어 가며 steps 에서 멈춘다. crown 은 다 센
+   * 자리 위에 東 을 띄울지로, 친을 정하는 장면에서만 켠다.
    */
-  count?: { readonly from: number; readonly steps: number };
+  count?: { readonly from: number; readonly steps: number; readonly crown?: boolean };
   /** 친 표시패를 spot 이 가리키는 자리 앞에 놓는다. */
   marker?: boolean;
+  /**
+   * 바로 옆이 아닌 단계에서 건너뛰어 왔다는 표시. 지나오지 않은 단계의 움직임을
+   * 다 보여 줄 이유가 없으므로, 움직이는 도중을 그리지 않고 이 단계의 모습으로
+   * 곧장 맞춘다.
+   */
+  instant?: boolean;
   class?: string;
 }) {
   let host!: HTMLDivElement;
@@ -288,10 +312,10 @@ export function TableView(props: {
     // 남은 패의 목록과 색은 상태가 바뀔 때만 다시 정한다. 자리(행렬)는 쌓는
     // 도중에도 매 프레임 달라지므로 아래 그리기 루프가 맡는다.
     let slots: WallSlot[] = [];
-    let ranks: number[] = [];
+    let order: { rank: number[]; total: number[] } = { rank: [], total: [] };
     createEffect(() => {
       slots = wallSlots(props.state);
-      ranks = buildOrder(slots);
+      order = buildOrder(slots);
       slots.forEach((slot, i) => {
         tiles.setColorAt(i, props.deadWall && slot.kind === "dead" ? deadColor : liveColor);
       });
@@ -299,10 +323,10 @@ export function TableView(props: {
       if (tiles.instanceColor) tiles.instanceColor.needsUpdate = true;
     });
 
-    /** 패 한 장이 다 내려앉는 데 쓰는 진행도의 비율. 짧게 잡아야 한 장씩 또각또각 쌓인다. */
-    const TILE_SPAN = 0.08;
-    /** 배패 한 장이 손으로 옮겨가는 데 쓰는 진행도의 비율. */
-    const DEAL_SPAN = 0.06;
+    /** 네 장 한 묶음이 다 내려앉는 데 쓰는 진행도의 비율. 짧게 잡아야 또각또각 쌓인다. */
+    const GROUP_SPAN = 0.18;
+    /** 배패 한 묶음이 손으로 옮겨가는 데 쓰는 진행도의 비율. */
+    const DEAL_SPAN = 0.14;
     /** 왕패를 뗄 때 패산 바깥으로 밀어내는 거리. */
     const SPLIT_GAP = 1.6;
     /**
@@ -312,6 +336,8 @@ export function TableView(props: {
     const DEAL_RADIUS = 10.0;
     /** 세운 패끼리의 간격. */
     const DEAL_PITCH = 1.02;
+    /** 선의 쯔모패를 배패 13장에서 떼어 놓는 거리. 손에 든 패와 뽑은 패는 다르다. */
+    const DRAW_GAP = 0.6;
 
     // 패를 세우는 회전. 엎어져 있던 패를 일으켜 그림이 그 자리 사람 쪽을 본다.
     const upright = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
@@ -327,7 +353,9 @@ export function TableView(props: {
      */
     const placeTiles = (progress: number, split: number, deal: number) => {
       slots.forEach((slot, i) => {
-        const laid = stagger(ranks[i], slots.length, progress, TILE_SPAN);
+        // 네 변이 동시에, 한 변 안에서는 네 장 묶음씩 쌓인다. 그래서 시차는
+        // 변마다 따로, 묶음 단위로 준다.
+        const laid = stagger(order.rank[i], order.total[i], progress, GROUP_SPAN);
         euler.set(0, slot.rotationY, 0);
         wallTurn.setFromEuler(euler);
         // 왕패는 패산 바깥으로 밀어 떼어 놓는다. 변의 바깥 방향이 곧 패를
@@ -339,10 +367,13 @@ export function TableView(props: {
           slot.z + Math.cos(slot.rotationY) * apart
         );
 
-        const taken = i < DEALT_TILES ? stagger(i, DEALT_TILES, deal, DEAL_SPAN) : 0;
+        // 배패도 네 장 묶음째로 간다. 그래서 시차를 장이 아니라 묶음으로 준다.
+        const taken = i < DEALT_TILES ? stagger(dealGroup(i), DEAL_GROUPS, deal, DEAL_SPAN) : 0;
         if (taken > 0) {
           const angle = seatAngle(dealSeat(i));
-          const along = (dealIndex(i) - (HAND_TILES - 1) / 2) * DEAL_PITCH;
+          const spot = dealIndex(i);
+          const along =
+            (spot - (HAND_TILES - 1) / 2) * DEAL_PITCH + (spot >= HAND_TILES ? DRAW_GAP : 0);
           handSpot.set(
             Math.sin(angle) * DEAL_RADIUS + Math.cos(angle) * along,
             TILE_SIZE.l / 2,
@@ -393,12 +424,15 @@ export function TableView(props: {
     /**
      * 라운드 수와 앉은 정도를 받아 네 글자를 제 자리에 놓는다. rounds 의 중간
      * 값이면 자리 사이에 서고, progress 의 중간 값이면 판 위에 떠 있다.
+     * draw 는 풍패를 뽑아 앉는 진행도로, 글자는 그 사람이 자기 패를 읽고 앉을
+     * 때 놓인다.
      */
-    const placeLabels = (rounds: number, progress: number) => {
+    const placeLabels = (rounds: number, progress: number, draw: number) => {
       labels.forEach((mesh, i) => {
         // 글자는 그 자리에 앉는 사람과 함께 들어온다. 자리 순서와 바람 순서가
         // 같은 처음 배치에서만 앉기 장면이 나오므로, 번호를 그대로 쓴다.
-        const entry = seatEntry(i, progress);
+        // 글자는 그 바람을 뽑은 사람이 이 자리로 와서 앉을 때 놓인다.
+        const entry = Math.max(seatEntry(i, progress), pickBeats(drawnBy(i), draw).sit);
         const angle = windAngle(i, rounds);
         const height = 0.02 + (1 - entry) * ENTRY_HEIGHT;
         mesh.position.set(Math.sin(angle) * LABEL_RADIUS, height, Math.cos(angle) * LABEL_RADIUS);
@@ -423,9 +457,12 @@ export function TableView(props: {
     const picks = props.picks !== undefined ? createPicks() : undefined;
     if (picks) scene.add(picks.group);
 
-    const mark =
-      props.count !== undefined || props.marker !== undefined ? createDealerMark() : undefined;
-    if (mark) scene.add(mark.group);
+    // 끊을 자리를 세는 표시도 처음 쓰이는 프레임에 만든다.
+    let breakMark: ReturnType<typeof createBreakMark> | undefined;
+
+    // 세는 표시도 주사위처럼, 처음 쓰이는 프레임에 만든다. 첫 단계에서는 세는
+    // 일도 표시패도 없는 장면이 있어, 마운트 시점의 prop 만 보고 만들 수 없다.
+    let mark: ReturnType<typeof createDealerMark> | undefined;
 
     // 치수선은 앞쪽 변의 앞면과 같은 평면에 세운다. 카메라가 (1,1,1) 쪽에 있어
     // 이 면은 늘 보이고, 눈금이 패의 이음매와 화면에서 그대로 겹친다.
@@ -504,35 +541,50 @@ export function TableView(props: {
     let winds = (props.winds ?? props.seated) ? 1 : 0;
     /** 한 프레임에 오르는 앉기 진행도. 넷이 다 앉기까지 1.2 초쯤 걸린다. */
     const ENTRY_SPEED = 1 / 75;
-    // 쌓기 진행도. 136 장이 다 놓이기까지 1.2 초쯤 걸린다.
+    // 쌓기 진행도. 136 장이 다 놓이기까지 2 초쯤 걸린다.
     let build = props.built ? 1 : 0;
-    const BUILD_SPEED = 1 / 70;
+    const BUILD_SPEED = 1 / 120;
     /** 남은 거리의 일부씩 좁힌다. 0.001 보다 가까우면 딱 붙여서 멈춘다. */
     const approach = (current: number, target: number, rate: number) => {
+      if (props.instant) return target;
       const gap = target - current;
       return Math.abs(gap) < 0.001 ? target : current + gap * rate;
     };
+    /** 0 과 1 사이를 일정한 속도로 오간다. */
+    const drift = (current: number, target: number, speed: number) => {
+      if (props.instant) return target;
+      return Math.min(1, Math.max(0, current + Math.sign(target - current) * speed));
+    };
     /** 지금 그려지고 있는 치수선의 진하기. 켜고 끄면 스르르 나타나고 사라진다. */
     let rulers = props.rulers ? 1 : 0;
-    /** 주사위가 구른 정도. 왕패를 뗀 정도. 배패를 가져간 정도. */
+    /** 주사위가 구른 정도와, 다 쓰고 판 아래로 꺼지는 정도. */
     let rolled = 0;
+    let sank = 0;
+    /** 꺼지는 데 0.7 초쯤 걸린다. */
+    const SINK_SPEED = 1 / 40;
+    /** 끊을 자리를 세어 나간 정도와, 그 표시의 진하기. */
+    let stacked = 0;
+    let breakShown = 0;
     let split = props.split ? 1 : 0;
     let deal = props.dealt ? 1 : 0;
-    /** 주사위가 멈추기까지 1.2 초, 배패를 다 가져가기까지 2 초쯤 걸린다. */
+    /** 주사위가 멈추기까지 1.2 초, 배패를 다 가져가기까지 5 초쯤 걸린다. */
     const ROLL_SPEED = 1 / 75;
-    const DEAL_SPEED = 1 / 120;
+    const DEAL_SPEED = 1 / 300;
     /**
-     * 풍패를 펼쳐 섞어 나눠 가지기까지의 정도와, 그것을 뒤집는 정도.
-     * 보여 주고 엎고 섞고 가져가는 네 박자가 다 보이도록 6 초쯤 쓴다.
+     * 풍패를 펼쳐 엎어 섞기까지의 정도와, 네 사람이 차례로 집어 읽고 앉기까지의
+     * 정도. 섞기와 뽑기가 단계 두 개로 나뉘어 있어 따로 센다.
      */
-    let offered = 0;
-    let picked = 0;
-    const PICK_SPEED = 1 / 360;
-    const REVEAL_SPEED = 1 / 60;
+    let mixed = 0;
+    let drawn = 0;
+    /** 섞기까지 4 초, 네 사람이 차례로 집어 읽고 앉기까지 5 초쯤 쓴다. */
+    const MIX_SPEED = 1 / 240;
+    const DRAW_SPEED = 1 / 300;
     /** 눈의 합을 띄운 정도와, 세어 나간 정도. 테두리와 표시패의 진하기. */
     let sumShown = 0;
     let counted = 0;
     let steps = props.count?.steps ?? 1;
+    /** 다 센 자리에 東 을 띄울지. 세기가 끝난 뒤에도 마지막 값을 그대로 쓴다. */
+    let crown = props.count?.crown ?? true;
     // 세기가 끝나고 표시패만 남는 단계에서도 표시는 마지막에 짚은 자리에 있어야
     // 한다. 그래서 세던 값을 그대로 들고 있는다.
     let from = props.count?.from ?? 0;
@@ -544,9 +596,9 @@ export function TableView(props: {
     const draw = () => {
       // 쌓기도 앉기처럼 일정한 속도로 흐른다. 앞 단계로 돌아가면 진행도가
       // 거꾸로 내려가, 마지막에 놓은 패부터 차례로 걷힌다.
-      build = Math.min(1, Math.max(0, build + (props.built ? BUILD_SPEED : -BUILD_SPEED)));
+      build = drift(build, props.built ? 1 : 0, BUILD_SPEED);
       split = approach(split, props.split ? 1 : 0, 0.1);
-      deal = Math.min(1, Math.max(0, deal + (props.dealt ? DEAL_SPEED : -DEAL_SPEED)));
+      deal = drift(deal, props.dealt ? 1 : 0, DEAL_SPEED);
       placeTiles(build, split, deal);
       const values = props.dice;
       if (values && !dice) {
@@ -565,45 +617,65 @@ export function TableView(props: {
         from = count.from;
         counted = 0;
       }
+      if (count) crown = count.crown ?? true;
+      if ((count || props.marker) && !mark) {
+        mark = createDealerMark();
+        scene.add(mark.group);
+      }
       if (dice) {
-        rolled = Math.min(1, Math.max(0, rolled + (values ? ROLL_SPEED : -ROLL_SPEED)));
-        dice.roll(rolled, shown);
-        sumShown = Math.min(
-          1,
-          Math.max(0, sumShown + (values && rolled >= 1 ? SUM_SPEED : -SUM_SPEED))
-        );
+        // 다음 단계로 넘어가면 주사위는 던진 자리로 되돌아가지 않고 판 아래로
+        // 꺼진다. 되감으면 굴린 것을 무르는 그림이 되어, 이야기가 앞으로
+        // 나아가는 것과 어긋난다.
+        sank = drift(sank, values ? 0 : 1, SINK_SPEED);
+        if (values) rolled = drift(rolled, 1, ROLL_SPEED);
+        else if (sank >= 1) rolled = 0;
+        // 주사위는 지금 굴리는 사람 자리에서 판 가운데로 던져진다.
+        dice.roll(rolled, shown, from, sank);
+        sumShown = drift(sumShown, values && rolled >= 1 ? 1 : 0, SUM_SPEED);
         dice.showSum(sumShown, shown[0] + shown[1]);
       }
       if (picks) {
-        offered = Math.min(1, Math.max(0, offered + (props.picks ? PICK_SPEED : -PICK_SPEED)));
-        // 뒤집기는 나눠 가지기가 끝난 뒤에 시작한다. 앞 단계를 건너뛰고 눌러도
-        // 펼치고 섞는 장면이 먼저 다 지나간다.
-        const flipping = props.picked && offered >= 1;
-        picked = Math.min(1, Math.max(0, picked + (flipping ? REVEAL_SPEED : -REVEAL_SPEED)));
-        picks.place(offered, picked);
+        // 뽑기는 섞기가 다 끝난 뒤에 시작한다. 앞 단계로 돌아갈 때는 거꾸로,
+        // 네 사람이 패를 판 가운데에 도로 놓고 일어선 뒤에 섞기가 풀린다.
+        mixed = drift(mixed, props.picks ? 1 : drawn > 0 ? mixed : 0, MIX_SPEED);
+        drawn = drift(drawn, props.picked === true && mixed >= 1 ? 1 : 0, DRAW_SPEED);
+        picks.place(mixed, drawn);
       }
       if (mark) {
-        counted = Math.min(
-          1,
-          Math.max(
-            0,
-            counted + countSpeed() * ((count && sumShown >= 1) || props.marker ? 1 : -1)
-          )
-        );
+        counted = drift(counted, (count && sumShown >= 1) || props.marker ? 1 : 0, countSpeed());
         ring = approach(ring, count === undefined ? 0 : 1, 0.12);
         plaque = approach(plaque, props.marker ? 1 : 0, 0.12);
-        mark.place(from, steps, counted, ring, plaque);
+        mark.place(from, steps, counted, ring, plaque, crown);
+      }
+      // 끊을 자리는 누구의 패산인지를 다 센 다음에 센다. 두 세기가 겹치면 같은
+      // 눈을 두 번 쓴다는 것이 읽히지 않는다.
+      if (props.breakCount && !breakMark) {
+        breakMark = createBreakMark();
+        scene.add(breakMark.group);
+      }
+      if (breakMark) {
+        // 변과 스택은 끊은 자리 하나에 다 들어 있다. 변마다 17 스택이라
+        // 몫이 변이고 나머지가 오른쪽 끝에서 센 스택 수, 곧 눈의 합이다.
+        const side = Math.floor(props.state.brokenAt / STACKS_PER_SIDE);
+        const steps = props.state.brokenAt % STACKS_PER_SIDE;
+        // 앞 단계에서 자리를 세고 있으면 그것이 끝나기를 기다린다. 세기가
+        // 끝난 다음 단계에서는 count 가 없으므로 곧장 센다.
+        const seatCounted = count === undefined || counted >= 1;
+        stacked = drift(
+          stacked,
+          props.breakCount && seatCounted ? 1 : 0,
+          1 / (30 * Math.max(1, steps))
+        );
+        breakShown = approach(breakShown, props.breakCount ? 1 : 0, 0.12);
+        breakMark.place(side, steps, stacked, breakShown);
       }
       rounds = approach(rounds, props.rounds ?? 0, 0.08);
       // 앉기는 일정한 속도로 흐른다. 자리마다 시차를 두려면 진행도가 고르게
       // 올라가야, 네 사람이 같은 간격으로 하나씩 들어온다.
-      entry = Math.min(1, Math.max(0, entry + (props.seated ? ENTRY_SPEED : -ENTRY_SPEED)));
-      winds = Math.min(
-        1,
-        Math.max(0, winds + ((props.winds ?? props.seated) ? ENTRY_SPEED : -ENTRY_SPEED))
-      );
-      placeLabels(rounds, winds);
-      hands?.place(entry);
+      entry = drift(entry, props.seated ? 1 : 0, ENTRY_SPEED);
+      winds = drift(winds, (props.winds ?? props.seated) ? 1 : 0, ENTRY_SPEED);
+      placeLabels(rounds, winds, drawn);
+      hands?.place(entry, drawn);
       if (arrow) {
         arrow.rotation.y = rounds * (Math.PI / 2);
         arrowMaterial!.opacity = entry;
@@ -645,6 +717,10 @@ export function TableView(props: {
       if (mark) {
         scene.remove(mark.group);
         mark.dispose();
+      }
+      if (breakMark) {
+        scene.remove(breakMark.group);
+        breakMark.dispose();
       }
       if (hands) {
         scene.remove(hands.group);

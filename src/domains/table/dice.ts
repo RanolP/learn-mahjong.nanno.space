@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { easeOutExpo } from "./animation";
+import { easeOutExpo, phase } from "./animation";
 
 /**
  * 판 가운데에서 구르는 주사위 두 개. 선이 굴린 눈의 합이 어느 패산을 어디서
@@ -10,6 +10,47 @@ import { easeOutExpo } from "./animation";
  */
 
 const SIZE = 1.15;
+/** 던지는 사람의 손이 있는 자리. 주사위는 여기서 판 가운데로 날아간다. */
+const THROW_RADIUS = 11;
+const THROW_HEIGHT = 2.4;
+/** 손을 떠나 판에 닿기까지 쓰는 진행도. 나머지는 튀다가 멈추는 데 쓴다. */
+const FLIGHT = 0.4;
+/** 날아가는 동안 포물선이 솟는 높이. */
+const ARC = 3.2;
+/** 처음 닿고 튀어 오르는 높이. */
+const BOUNCE = 1.6;
+/**
+ * 다 쓴 뒤 판 아래로 가라앉는 깊이. 판은 배경색이라 바닥 면이 따로 없으므로,
+ * 가라앉는 만큼 함께 옅어지게 해서 바닥으로 꺼지는 것으로 보이게 한다.
+ */
+const SINK_DEPTH = 2.5;
+/**
+ * 한 번 튈 때마다 남는 속도의 비율. 높이는 이 값의 제곱으로, 튀는 시간은 이
+ * 값 그대로 줄어든다. 등비급수의 합이 1 이라, 튀는 구간이 남는 진행도를 꼭
+ * 채우고 끝난다.
+ */
+const RESTITUTION = 0.55;
+
+/**
+ * 판에 닿은 뒤 t 만큼 지났을 때 떠 있는 높이. 튈 때마다 낮아지고 짧아지는
+ * 포물선을 이어 붙인 것으로, 실제로 튀는 물건과 같은 모양이다.
+ */
+function bounceHeight(t: number, height: number): number {
+  let start = 0;
+  let span = 1 - RESTITUTION;
+  let peak = height;
+  // 여섯 번쯤 튀면 높이가 눈에 보이지 않을 만큼 낮아진다.
+  for (let i = 0; i < 6; i += 1) {
+    if (t < start + span) {
+      const local = (t - start) / span;
+      return 4 * local * (1 - local) * peak;
+    }
+    start += span;
+    span *= RESTITUTION;
+    peak *= RESTITUTION * RESTITUTION;
+  }
+  return 0;
+}
 /** 상자 면의 차례는 +X, -X, +Y, -Y, +Z, -Z 다. 마주 보는 두 면의 합이 7이다. */
 const FACES = [3, 4, 1, 6, 2, 5] as const;
 
@@ -104,7 +145,12 @@ const SUMS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
  */
 export function createDice(): {
   group: THREE.Group;
-  roll: (progress: number, values: readonly [number, number]) => void;
+  roll: (
+    progress: number,
+    values: readonly [number, number],
+    from: number,
+    sink: number
+  ) => void;
   /** 두 눈의 합을 주사위 위에 크게 띄운다. 0 이면 없고 1 이면 또렷하다. */
   showSum: (opacity: number, value: number) => void;
   dispose: () => void;
@@ -151,23 +197,49 @@ export function createDice(): {
   const spin = new THREE.Quaternion();
   const target = new THREE.Quaternion();
   const euler = new THREE.Euler();
+  const start = new THREE.Vector3();
+  const end = new THREE.Vector3();
 
   return {
     group,
-    /** 눈은 부를 때마다 받는다. 한 장면에서 두 번 굴리는 곳이 있어서다. */
-    roll(progress: number, values: readonly [number, number]) {
-      group.visible = progress > 0.01;
-      for (const material of materials) material.opacity = Math.min(1, progress * 4);
+    /**
+     * 눈과 던지는 사람은 부를 때마다 받는다. 한 장면에서 다른 사람이 두 번
+     * 굴리는 곳이 있어서다. from 은 굴리는 사람의 자리 번호로, 東 을 0 으로
+     * 하고 반시계로 센다. sink 는 다 쓰고 판 아래로 꺼지는 정도다.
+     */
+    roll(progress: number, values: readonly [number, number], from: number, sink: number) {
+      group.visible = progress > 0.01 && sink < 0.99;
+      const fade = Math.min(1, progress * 6) * (1 - sink);
+      for (const material of materials) material.opacity = fade;
+      const angle = from * (Math.PI / 2);
+      const fly = phase(progress, 0, FLIGHT);
+      const land = phase(progress, FLIGHT, 1);
       dice.forEach((mesh, i) => {
+        // 멈추는 자리는 판 가운데다. 두 개가 겹치지 않게 옆으로 조금 벌린다.
+        const aside = (i - 0.5) * SIZE * 1.6;
+        start.set(
+          Math.sin(angle) * THROW_RADIUS + Math.cos(angle) * aside,
+          THROW_HEIGHT,
+          Math.cos(angle) * THROW_RADIUS - Math.sin(angle) * aside
+        );
+        end.set(aside, SIZE / 2, 0);
+        // 손을 떠난 뒤 가로 속도는 변하지 않는다. 그래서 곧게 날아가고,
+        // 높이만 포물선을 그린다.
+        mesh.position.lerpVectors(start, end, fly);
+        mesh.position.y =
+          fly < 1
+            ? start.y + (end.y - start.y) * fly + 4 * fly * (1 - fly) * ARC
+            : end.y + bounceHeight(land, BOUNCE);
+        mesh.position.y -= sink * SINK_DEPTH;
+
         target.setFromEuler(euler.set(...UPRIGHT[values[i]]));
-        // 처음에는 마구 구르다가 정해진 눈으로 미끄러져 멈춘다. 끝에서는
-        // 섞은 각도가 그대로 목표 각도가 되어 딱 떨어진다.
-        const settle = easeOutExpo(progress);
+        // 날아가는 동안과 첫 번째 튐까지는 마구 구르고, 그 뒤로 정해진 눈으로
+        // 미끄러져 멈춘다. 튀는 도중에 눈이 정해져 버리면 굴린 것으로 보이지
+        // 않는다.
+        const settle = easeOutExpo(phase(land, 1 - RESTITUTION, 1));
         euler.set(progress * (14 + i * 3), progress * (11 - i * 2), progress * (17 + i));
         spin.setFromEuler(euler);
         mesh.quaternion.copy(spin).slerp(target, settle);
-        // 구르는 동안 한 번 튀어 오른다.
-        mesh.position.y = SIZE / 2 + Math.sin(Math.min(1, progress) * Math.PI) * 1.6;
       });
     },
     showSum(opacity: number, value: number) {

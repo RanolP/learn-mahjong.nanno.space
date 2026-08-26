@@ -21,12 +21,16 @@ const FAKE = sum(FIRST) - 1;
 const STEPS = [
   { label: "빈 작탁", caption: "아무것도 놓이지 않은 작탁이다. 여기서 시작한다." },
   {
-    label: "풍패 뽑기",
-    caption: "동남서북 패 네 장을 펼쳐 보이고, 엎어서 섞고, 한 장씩 가져간다."
+    label: "풍패 섞기",
+    caption:
+      "동남서북 패 네 장을 펼쳐 보인 뒤 엎는다. 판 위에서 손으로 둥글게 휘저어 " +
+      "섞고, 다 섞으면 한 줄로 모아 놓는다."
   },
   {
-    label: "앉기",
-    caption: "뽑은 바람이 자기 자리다. 동, 남, 서, 북 순서대로 앉는다."
+    label: "풍패 뽑아 앉기",
+    caption:
+      "한 사람이 패 한 장을 집어 뒤집어 읽는다. 읽고 나서야 자기 자리를 알고, " +
+      "그 바람 자리로 가서 앉는다. 네 사람이 차례로 되풀이한다."
   },
   {
     label: "가짜 친",
@@ -49,12 +53,11 @@ const STEPS = [
 export function PickDealer() {
   return (
     <Stepper steps={STEPS}>
-      {step => (
+      {(step, instant) => (
         <TableView
+          instant={instant()}
           state={{ brokenAt: 12, drawn: 0 }}
           seats
-          seated={step() > 0}
-          winds={step() > 1}
           picks={step() > 0}
           picked={step() > 1}
           dice={step() === 3 ? FIRST : step() === 4 ? SECOND : undefined}

@@ -20,7 +20,17 @@ export const LESSONS: readonly Lesson[] = [
   {
     slug: "02-setup",
     title: "게임 준비",
-    summary: "패 136장, 자리와 바람, 배패 13장, 그리고 도라를 알아본다."
+    summary: "패 136장, 자리와 바람, 배패 13장을 알아본다."
+  },
+  {
+    slug: "03-hands",
+    title: "패 만들기",
+    summary: "손에 든 13장으로 무엇을 만들어야 화료인지 알아본다."
+  },
+  {
+    slug: "04-round",
+    title: "라운드 진행",
+    summary: "판이 바뀔 때 바람이 어떻게 도는지 알아본다."
   }
 ];
 

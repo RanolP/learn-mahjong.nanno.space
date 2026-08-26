@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { ENTRY_HEIGHT } from "./animation";
-import { WINDS, seatAngle, seatEntry } from "./seats";
+import { DRAWN, WINDS, pickBeats, pickPathAngle, seatEntry, standAside } from "./seats";
 
 /**
  * 자리마다 손 한 쌍을 판 위에 올려 둔다. 누가 어디에 앉는지 글자만으로는 잘
@@ -18,13 +18,18 @@ import { WINDS, seatAngle, seatEntry } from "./seats";
 const HAND_RADIUS = 12.3;
 
 /**
- * 자리마다 다른 손 색. 네 사람이 서로 구분되게 바람 순서대로 붙인다.
- * 실제 피부색 네 가지를 밝은 쪽에서 짙은 쪽으로 늘어놓아, 원색으로 칠하지
- * 않고도 초록 판 위에서 넷이 서로 구별된다.
+ * 사람마다 다른 손 색. 자리가 아니라 사람에 붙는 색이라, 자리를 옮겨 앉아도
+ * 같은 색이 따라간다. 실제 피부색 네 가지를 밝은 쪽에서 짙은 쪽으로 늘어놓아,
+ * 원색으로 칠하지 않고도 초록 판 위에서 넷이 서로 구별된다.
  */
-const SEAT_COLORS = ["#f6d5b8", "#dda06b", "#a9663c", "#6d3f26"] as const;
+const PERSON_COLORS = ["#f6d5b8", "#dda06b", "#a9663c", "#6d3f26"] as const;
 /** 한 자리에서 두 손이 좌우로 벌어진 거리. */
 const HAND_SPREAD = 2.1;
+/**
+ * 풍패를 집으려고 판 가운데로 뻗는 거리. 가장 깊이 들어갔을 때 손끝이 판
+ * 가운데에 모인 패와 만나는 자리다.
+ */
+const REACH = 5.2;
 
 const PALM = { w: 1.45, h: 0.28, l: 1.3 } as const;
 const FINGER_RADIUS = 0.15;
@@ -90,46 +95,61 @@ function makeHand(
  */
 export function createHands(): {
   group: THREE.Group;
-  place: (entry: number) => void;
+  place: (entry: number, draw: number) => void;
   dispose: () => void;
 } {
   const palm = new THREE.BoxGeometry(PALM.w, PALM.h, PALM.l);
   const fingers = FINGERS.map(f => new THREE.CapsuleGeometry(FINGER_RADIUS, f.length, 4, 10));
   const thumb = new THREE.CapsuleGeometry(FINGER_RADIUS, 0.5, 4, 10);
-  const materials = SEAT_COLORS.map(
+  const materials = PERSON_COLORS.map(
     color => new THREE.MeshStandardMaterial({ color, roughness: 0.85, transparent: true })
   );
 
   const group = new THREE.Group();
-  const seats: { node: THREE.Group; angle: number }[] = [];
-  WINDS.forEach((_, i) => {
-    const angle = seatAngle(i);
-    const seat = new THREE.Group();
-    seats.push({ node: seat, angle });
-    seat.position.set(Math.sin(angle) * HAND_RADIUS, 0, Math.cos(angle) * HAND_RADIUS);
-    // 반 바퀴 더 돌려, 손가락이 판 바깥이 아니라 판 가운데를 향하게 한다.
-    seat.rotation.y = angle + Math.PI;
-
+  // 손 한 쌍이 사람 하나다. 자리가 아니라 사람에 매어 두어야, 뽑은 바람에 따라
+  // 자리를 옮겨 앉는 것을 그릴 수 있다.
+  const people = WINDS.map((_, person) => {
+    const node = new THREE.Group();
     for (const offset of [-HAND_SPREAD / 2, HAND_SPREAD / 2]) {
       const handedness = offset < 0 ? 1 : -1;
-      const hand = makeHand(handedness, palm, fingers, thumb, materials[i]);
+      const hand = makeHand(handedness, palm, fingers, thumb, materials[person]);
       hand.position.x = offset;
-      seat.add(hand);
+      node.add(hand);
     }
-    group.add(seat);
+    group.add(node);
+    return { node, person, seat: DRAWN[person] };
   });
 
   return {
     group,
     /**
-     * 앉은 정도. 0 이면 넷 다 판 위에 떠 있고, 1 이면 넷 다 판에 손을 올린
-     * 자리다. 그 사이에서는 동, 남, 서, 북 순서대로 하나씩 내려앉는다.
+     * progress 는 그냥 앉은 정도다. 0 이면 넷 다 판 위에 떠 있고, 1 이면 넷 다
+     * 판에 손을 올린 자리다. 그 사이에서는 동, 남, 서, 북 순서대로 내려앉는다.
+     *
+     * draw 는 풍패를 뽑아 앉는 정도다. 자기 차례가 오면 손이 판 위에 떠서
+     * 나타나 가운데로 뻗어 패를 집어 오고, 그 패를 읽고 나서야 자리에 내려앉는다.
+     * 두 진행도 중 더 나아간 쪽을 쓰므로, 뽑는 장면이 없는 그림은 앞의 것만으로
+     * 움직인다.
      */
-    place(progress: number) {
-      seats.forEach((seat, i) => {
-        const entry = seatEntry(i, progress);
-        materials[i].opacity = entry;
-        seat.node.position.y = (1 - entry) * ENTRY_HEIGHT;
+    place(progress: number, draw: number) {
+      people.forEach(({ node, person, seat }) => {
+        const seated = seatEntry(seat, progress);
+        const beats = pickBeats(person, draw);
+        // 손을 뻗기 시작하는 순간에는 이미 다 보여야 한다. 그래서 나타나는
+        // 정도는 집기 진행도보다 훨씬 빨리 올라간다.
+        materials[person].opacity = Math.max(seated, Math.min(1, beats.take * 8));
+        // 읽고 나서야 자기 자리를 알므로, 그때 서 있던 줄을 떠나 그 자리로 간다.
+        const settled = Math.max(seated, beats.sit);
+        const angle = pickPathAngle(person, settled);
+        const aside = standAside(person, settled);
+        const radius = HAND_RADIUS - Math.sin(beats.take * Math.PI) * REACH;
+        node.position.set(
+          Math.sin(angle) * radius + Math.cos(angle) * aside,
+          (1 - settled) * ENTRY_HEIGHT,
+          Math.cos(angle) * radius - Math.sin(angle) * aside
+        );
+        // 반 바퀴 더 돌려, 손가락이 판 바깥이 아니라 판 가운데를 향하게 한다.
+        node.rotation.y = angle + Math.PI;
       });
     },
     dispose() {
